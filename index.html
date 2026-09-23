@@ -137,18 +137,33 @@ function poisson(lh,la,rho){
   return{h:h/s,d:d/s,a:a/s,o25:o25/s,bt:bt/s,marc:best[0]+"-"+best[1]};
 }
 
-function calcElo(lista){
-  const R={},K=20,HA=60;
+// Elo + datos de entrenamiento para la regresión logística
+function construirDatos(lista){
+  const R={},K=20,HA=60,hist={},filas=[];
+  const forma=id=>{
+    const a=(hist[id]||[]).slice(-5);
+    if(a.length<3)return null;
+    let pts=0,gd=0;
+    a.forEach(x=>{pts+=x[0];gd+=x[1];});
+    return{pts:pts/a.length,gd:gd/a.length};
+  };
   lista.forEach(([t,h,a,gh,ga])=>{
     const rh=R[h]??1500,ra=R[a]??1500;
+    const fh=forma(h),fa=forma(a);
+    if(fh&&fa){
+      filas.push({x:[(rh+HA-ra)/400,(fh.pts-fa.pts)/3,(fh.gd-fa.gd)/2],y:gh>ga?0:gh==ga?1:2});
+    }
     const e=1/(1+Math.pow(10,-(rh+HA-ra)/400));
     const s=gh>ga?1:gh==ga?0.5:0;
     const dif=Math.abs(gh-ga);
     const mult=dif<=1?1:dif==2?1.5:(11+dif)/8;
     const cambio=K*mult*(s-e);
     R[h]=rh+cambio;R[a]=ra-cambio;
+    hist[h]=hist[h]||[];hist[a]=hist[a]||[];
+    hist[h].push([gh>ga?3:gh==ga?1:0,gh-ga]);
+    hist[a].push([ga>gh?3:gh==ga?1:0,ga-gh]);
   });
-  return R;
+  return{R:R,filas:filas,forma:forma};
 }
 function eloProb(R,h,a){
   const dr=(R[h]??1500)+60-(R[a]??1500);
@@ -157,6 +172,40 @@ function eloProb(R,h,a){
   const ph=Math.max(0.02,e-pd/2),pa=Math.max(0.02,1-e-pd/2);
   const s=ph+pd+pa;
   return{h:ph/s,d:pd/s,a:pa/s};
+}
+
+// Regresión logística multinomial (local, empate, visitante)
+function softmax(z){
+  const m=Math.max(...z);
+  const e=z.map(v=>Math.exp(v-m));
+  const s=e.reduce((a,b)=>a+b,0);
+  return e.map(v=>v/s);
+}
+function entrenar(filas){
+  if(filas.length<30)return null;
+  const W=[[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+  const n=filas.length;
+  for(let it=0;it<400;it++){
+    const G=[[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+    filas.forEach(f=>{
+      const x=[1,f.x[0],f.x[1],f.x[2]];
+      const p=softmax(W.map(w=>w.reduce((s,wi,i)=>s+wi*x[i],0)));
+      for(let c=0;c<3;c++){
+        const err=p[c]-(f.y===c?1:0);
+        for(let i=0;i<4;i++)G[c][i]+=err*x[i];
+      }
+    });
+    for(let c=0;c<3;c++)for(let i=0;i<4;i++){
+      W[c][i]-=0.5*(G[c][i]/n+(i>0?0.05*W[c][i]:0));
+    }
+  }
+  return W;
+}
+function logistica(W,x){
+  if(!W)return null;
+  const xs=[1,x[0],x[1],x[2]];
+  const p=softmax(W.map(w=>w.reduce((s,wi,i)=>s+wi*xs[i],0)));
+  return{h:p[0],d:p[1],a:p[2]};
 }
 
 const pc=x=>(x*100).toFixed(0)+"%";
@@ -176,14 +225,27 @@ async function predecir(id){
     const L1=lambdas(fuerza(lista,0.006),h,a);
     const p=poisson(L0.lh,L0.la,0);
     const dc=poisson(L1.lh,L1.la,-0.1);
-    const e=eloProb(calcElo(lista),h,a);
-    const prom={h:(p.h+dc.h+e.h)/3,d:(p.d+dc.d+e.d)/3,a:(p.a+dc.a+e.a)/3};
+    const D=construirDatos(lista);
+    const e=eloProb(D.R,h,a);
+    const W=entrenar(D.filas);
+    const fh=D.forma(h),fa=D.forma(a);
+    const xn=[((D.R[h]??1500)+60-(D.R[a]??1500))/400,fh&&fa?(fh.pts-fa.pts)/3:0,fh&&fa?(fh.gd-fa.gd)/2:0];
+    const lg=logistica(W,xn);
+    const modelos=[p,dc,e];
+    if(lg)modelos.push(lg);
+    const n=modelos.length;
+    const prom={
+      h:modelos.reduce((s,r)=>s+r.h,0)/n,
+      d:modelos.reduce((s,r)=>s+r.d,0)/n,
+      a:modelos.reduce((s,r)=>s+r.a,0)/n
+    };
     box.innerHTML=
       "<b>Resultado</b> (local · empate · visitante)<br>"+
       '<div class="mod">Poisson: '+fila(p)+"</div>"+
       '<div class="mod">Dixon-Coles: '+fila(dc)+"</div>"+
       '<div class="mod">Elo: '+fila(e)+"</div>"+
-      "<b>Promedio de los 3</b>"+barra(prom)+
+      '<div class="mod">Regresión logística: '+(lg?fila(lg):"pocos datos aún (se necesitan al menos 30 partidos)")+"</div>"+
+      "<b>Promedio de "+n+" modelos</b>"+barra(prom)+
       m.homeTeam.name+" gana · Empate · "+m.awayTeam.name+" gana<br><br>"+
       "Goles esperados: "+L1.lh.toFixed(2)+" - "+L1.la.toFixed(2)+"<br>"+
       "Marcador más probable: <b>"+dc.marc+"</b><br>"+
@@ -194,5 +256,3 @@ async function predecir(id){
 }
 cargar();
 </script></body></html>
-
-
