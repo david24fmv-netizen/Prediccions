@@ -10,6 +10,10 @@ body{font-family:-apple-system,sans-serif;margin:0;padding:16px;background:#0f17
 h1{font-size:22px}
 h2{font-size:15px;color:#38bdf8;margin:18px 0 6px}
 .p{background:#1e293b;border-radius:10px;padding:10px;margin:6px 0;display:flex;justify-content:space-between;gap:8px}
+.det{background:#162032;border-radius:10px;padding:10px;margin:-2px 0 8px;font-size:14px;line-height:1.6}
+.bar{display:flex;height:22px;border-radius:6px;overflow:hidden;margin:6px 0;font-size:12px;color:#0f172a}
+.bar div{display:flex;align-items:center;justify-content:center}
+.nota{font-size:12px;color:#94a3b8;margin-top:8px}
 button{background:#38bdf8;border:0;border-radius:8px;padding:8px 12px;font-size:15px}
 </style></head><body>
 <h1>⚽ Partidos de hoy</h1>
@@ -17,21 +21,27 @@ button{background:#38bdf8;border:0;border-radius:8px;padding:8px 12px;font-size:
 <div id="app">Cargando...</div>
 <script>
 const $=id=>document.getElementById(id);
+const M={};
 function cambiarKey(){
   const k=prompt("Pega tu API key de API-Football");
   if(k){localStorage.setItem("key",k.trim());cargar();}
 }
-async function cargar(){
+async function api(ruta){
   const key=localStorage.getItem("key");
-  if(!key){cambiarKey();return;}
+  const r=await fetch("https://v3.football.api-sports.io"+ruta,{headers:{"x-apisports-key":key}});
+  const d=await r.json();
+  const err=Object.values(d.errors||{}).join(" ");
+  if(err)throw new Error(err);
+  return d;
+}
+async function cargar(){
+  if(!localStorage.getItem("key")){cambiarKey();return;}
   const hoy=new Date().toLocaleDateString("en-CA",{timeZone:"America/Bogota"});
   try{
-    const r=await fetch("https://v3.football.api-sports.io/fixtures?date="+hoy+"&timezone=America/Bogota",{headers:{"x-apisports-key":key}});
-    const d=await r.json();
-    const err=Object.values(d.errors||{}).join(" ");
-    if(err){$("app").textContent="Error: "+err;return;}
+    const d=await api("/fixtures?date="+hoy+"&timezone=America/Bogota");
     const g={};
     d.response.forEach(m=>{
+      M[m.fixture.id]=m;
       const k=m.league.country+" — "+m.league.name;
       (g[k]=g[k]||[]).push(m);
     });
@@ -40,11 +50,61 @@ async function cargar(){
       h+="<h2>"+k+"</h2>";
       g[k].forEach(m=>{
         const hora=new Date(m.fixture.date).toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit",timeZone:"America/Bogota"});
-        h+='<div class="p"><span>'+m.teams.home.name+" vs "+m.teams.away.name+"</span><span>"+hora+"</span></div>";
+        h+='<div class="p" onclick="predecir('+m.fixture.id+')"><span>'+m.teams.home.name+" vs "+m.teams.away.name+"</span><span>"+hora+'</span></div><div id="d'+m.fixture.id+'" class="det" style="display:none"></div>';
       });
     });
     $("app").innerHTML=h||"No hay partidos hoy.";
-  }catch(e){$("app").textContent="Error de conexión: "+e.message;}
+  }catch(e){$("app").textContent="Error: "+e.message;}
+}
+async function statsEquipo(liga,temp,eq){
+  const k="t_"+liga+"_"+temp+"_"+eq+"_"+new Date().toDateString();
+  const c=localStorage.getItem(k);
+  if(c)return JSON.parse(c);
+  const d=await api("/teams/statistics?league="+liga+"&season="+temp+"&team="+eq);
+  localStorage.setItem(k,JSON.stringify(d.response));
+  return d.response;
+}
+const num=x=>{const n=parseFloat(x);return isNaN(n)?1.3:n;};
+function fact(n){let r=1;for(let i=2;i<=n;i++)r*=i;return r;}
+function pois(k,l){return Math.exp(-l)*Math.pow(l,k)/fact(k);}
+function poisson(lh,la){
+  let h=0,d=0,a=0,o25=0,bt=0,best=[0,0,0];
+  for(let i=0;i<=10;i++)for(let j=0;j<=10;j++){
+    const p=pois(i,lh)*pois(j,la);
+    if(i>j)h+=p;else if(i==j)d+=p;else a+=p;
+    if(i+j>2)o25+=p;
+    if(i>0&&j>0)bt+=p;
+    if(p>best[2])best=[i,j,p];
+  }
+  const s=h+d+a;
+  return{h:h/s,d:d/s,a:a/s,o25:o25/s,bt:bt/s,marc:best[0]+"-"+best[1]};
+}
+const pc=x=>(x*100).toFixed(0)+"%";
+async function predecir(id){
+  const box=$("d"+id);
+  if(box.style.display==="block"){box.style.display="none";return;}
+  box.style.display="block";
+  box.textContent="Calculando...";
+  const m=M[id];
+  try{
+    const L=m.league.id,S=m.league.season;
+    const H=await statsEquipo(L,S,m.teams.home.id);
+    const A=await statsEquipo(L,S,m.teams.away.id);
+    const hf=num(H.goals.for.average.home),hc=num(H.goals.against.average.home);
+    const af=num(A.goals.for.average.away),ac=num(A.goals.against.average.away);
+    const lh=(hf+ac)/2,la=(af+hc)/2;
+    const r=poisson(lh,la);
+    box.innerHTML=
+      "<b>Modelo Poisson</b><br>"+
+      '<div class="bar"><div style="width:'+pc(r.h)+';background:#4ade80">'+pc(r.h)+'</div><div style="width:'+pc(r.d)+';background:#fbbf24">'+pc(r.d)+'</div><div style="width:'+pc(r.a)+';background:#f87171">'+pc(r.a)+"</div></div>"+
+      m.teams.home.name+" gana · Empate · "+m.teams.away.name+" gana<br>"+
+      "Goles esperados: "+lh.toFixed(2)+" - "+la.toFixed(2)+"<br>"+
+      "Marcador más probable: <b>"+r.marc+"</b><br>"+
+      "Más de 2.5 goles: <b>"+pc(r.o25)+"</b> · Menos: "+pc(1-r.o25)+"<br>"+
+      "Ambos marcan: <b>"+pc(r.bt)+"</b> · No: "+pc(1-r.bt)+
+      '<div class="nota">Estimación estadística, no una certeza.</div>';
+  }catch(e){box.textContent="Error: "+e.message;}
 }
 cargar();
 </script></body></html>
+
