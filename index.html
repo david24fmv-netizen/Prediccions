@@ -106,6 +106,83 @@ function lambdas(F,h,a){
   return{lh:F.mh*attH*defA,la:F.ma*attA*defH};
 }
 
-function fact(n){let r=1;for(let i=2;i
-                             
+function fact(n){let r=1;for(let i=2;i<=n;i++)r*=i;return r;}
+function pois(k,l){return Math.exp(-l)*Math.pow(l,k)/fact(k);}
+function poisson(lh,la,rho){
+  let h=0,d=0,a=0,o25=0,bt=0,best=[0,0,0];
+  for(let i=0;i<=10;i++)for(let j=0;j<=10;j++){
+    let p=pois(i,lh)*pois(j,la);
+    if(rho){
+      if(i==0&&j==0)p*=1-lh*la*rho;
+      else if(i==0&&j==1)p*=1+lh*rho;
+      else if(i==1&&j==0)p*=1+la*rho;
+      else if(i==1&&j==1)p*=1-rho;
+    }
+    if(i>j)h+=p;else if(i==j)d+=p;else a+=p;
+    if(i+j>2)o25+=p;
+    if(i>0&&j>0)bt+=p;
+    if(p>best[2])best=[i,j,p];
+  }
+  const s=h+d+a;
+  return{h:h/s,d:d/s,a:a/s,o25:o25/s,bt:bt/s,marc:best[0]+"-"+best[1]};
+}
+
+function calcElo(lista){
+  const R={},K=20,HA=60;
+  lista.forEach(([t,h,a,gh,ga])=>{
+    const rh=R[h]??1500,ra=R[a]??1500;
+    const e=1/(1+Math.pow(10,-(rh+HA-ra)/400));
+    const s=gh>ga?1:gh==ga?0.5:0;
+    const dif=Math.abs(gh-ga);
+    const mult=dif<=1?1:dif==2?1.5:(11+dif)/8;
+    const cambio=K*mult*(s-e);
+    R[h]=rh+cambio;R[a]=ra-cambio;
+  });
+  return R;
+}
+function eloProb(R,h,a){
+  const dr=(R[h]??1500)+60-(R[a]??1500);
+  const e=1/(1+Math.pow(10,-dr/400));
+  const pd=0.30*Math.exp(-Math.pow(dr/450,2));
+  const ph=Math.max(0.02,e-pd/2),pa=Math.max(0.02,1-e-pd/2);
+  const s=ph+pd+pa;
+  return{h:ph/s,d:pd/s,a:pa/s};
+}
+
+const pc=x=>(x*100).toFixed(0)+"%";
+const fila=r=>pc(r.h)+" · "+pc(r.d)+" · "+pc(r.a);
+const barra=r=>'<div class="bar"><div style="width:'+pc(r.h)+';background:#4ade80">'+pc(r.h)+'</div><div style="width:'+pc(r.d)+';background:#fbbf24">'+pc(r.d)+'</div><div style="width:'+pc(r.a)+';background:#f87171">'+pc(r.a)+"</div></div>";
+
+async function predecir(id){
+  const box=$("d"+id);
+  if(box.style.display==="block"){box.style.display="none";return;}
+  box.style.display="block";
+  box.textContent="Calculando...";
+  const m=M[id];
+  try{
+    const lista=await historial(m.competition.code);
+    const h=m.homeTeam.id,a=m.awayTeam.id;
+    const L0=lambdas(fuerza(lista,0),h,a);
+    const L1=lambdas(fuerza(lista,0.006),h,a);
+    const p=poisson(L0.lh,L0.la,0);
+    const dc=poisson(L1.lh,L1.la,-0.1);
+    const e=eloProb(calcElo(lista),h,a);
+    const prom={h:(p.h+dc.h+e.h)/3,d:(p.d+dc.d+e.d)/3,a:(p.a+dc.a+e.a)/3};
+    box.innerHTML=
+      "<b>Resultado</b> (local · empate · visitante)<br>"+
+      '<div class="mod">Poisson: '+fila(p)+"</div>"+
+      '<div class="mod">Dixon-Coles: '+fila(dc)+"</div>"+
+      '<div class="mod">Elo: '+fila(e)+"</div>"+
+      "<b>Promedio de los 3</b>"+barra(prom)+
+      m.homeTeam.name+" gana · Empate · "+m.awayTeam.name+" gana<br><br>"+
+      "Goles esperados: "+L1.lh.toFixed(2)+" - "+L1.la.toFixed(2)+"<br>"+
+      "Marcador más probable: <b>"+dc.marc+"</b><br>"+
+      "Más de 2.5 goles: <b>"+pc(dc.o25)+"</b> · Menos: "+pc(1-dc.o25)+"<br>"+
+      "Ambos marcan: <b>"+pc(dc.bt)+"</b> · No: "+pc(1-dc.bt)+
+      '<div class="nota">Basado en '+lista.length+' partidos de la temporada actual. Con pocos partidos la estimación es débil. No es una certeza.</div>';
+  }catch(err){box.textContent="Error: "+err.message;}
+}
+cargar();
+</script></body></html>
+
 
