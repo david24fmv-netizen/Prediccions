@@ -87,7 +87,7 @@ async function predecir(id){
   box.textContent="Calculando...";
   const m=M[id];
   try{
-    const L=m.league.id,S=m.league.season;
+    const L=m.league.id,S=2024;
     const H=await statsEquipo(L,S,m.teams.home.id);
     const A=await statsEquipo(L,S,m.teams.away.id);
     const hf=num(H.goals.for.average.home),hc=num(H.goals.against.average.home);
