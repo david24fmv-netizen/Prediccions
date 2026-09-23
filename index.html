@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Predicciones">
 <title>Predicciones</title>
 <style>
@@ -15,34 +16,26 @@ h2{font-size:15px;color:#38bdf8;margin:18px 0 6px}
 .bar div{display:flex;align-items:center;justify-content:center}
 .mod{margin:2px 0;color:#cbd5e1}
 .nota{font-size:12px;color:#94a3b8;margin-top:8px}
-button{background:#38bdf8;border:0;border-radius:8px;padding:8px 12px;font-size:15px}
 </style></head><body>
 <h1>⚽ Partidos de hoy</h1>
-<button onclick="cambiarKey()">Cambiar token</button>
 <div id="app">Cargando...</div>
 <script>
 const $=id=>document.getElementById(id);
 const M={};
-const BASE="https://api.football-data.org/v4";
+const BASE="https://futbol-proxy.david24fmv.workers.dev/v4";
 
-function cambiarKey(){
-  const k=prompt("Pega tu token de football-data.org");
-  if(k){localStorage.setItem("fdkey",k.trim());cargar();}
-}
 async function api(ruta){
-  const key=localStorage.getItem("fdkey");
   let r;
-  try{r=await fetch(BASE+ruta,{headers:{"X-Auth-Token":key}});}
-  catch(e){throw new Error("No se pudo conectar. Revisa tu internet o el token.");}
+  try{r=await fetch(BASE+ruta);}
+  catch(e){throw new Error("No se pudo conectar con el intermediario.");}
   let d={};
   try{d=await r.json();}catch(e){}
   if(r.status==429)throw new Error("Muchas consultas seguidas. Espera un minuto.");
-  if(r.status==401||r.status==403)throw new Error("Token inválido o sin acceso.");
+  if(r.status==401||r.status==403)throw new Error("Token inválido o sin acceso. Revisa el token en Cloudflare.");
   if(!r.ok)throw new Error(d.message||("Error "+r.status));
   return d;
 }
 async function cargar(){
-  if(!localStorage.getItem("fdkey")){cambiarKey();return;}
   const hoy=new Date().toLocaleDateString("en-CA",{timeZone:"America/Bogota"});
   const hasta=new Date(new Date(hoy+"T12:00:00Z").getTime()+2*86400000).toISOString().slice(0,10);
   try{
