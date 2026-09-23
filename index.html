@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Predicciones">
+<title>Predicciones</title>
+<style>
+body{font-family:-apple-system,sans-serif;margin:0;padding:16px;background:#0f172a;color:#e2e8f0}
+h1{font-size:22px}
+h2{font-size:15px;color:#38bdf8;margin:18px 0 6px}
+.p{background:#1e293b;border-radius:10px;padding:10px;margin:6px 0;display:flex;justify-content:space-between;gap:8px}
+button{background:#38bdf8;border:0;border-radius:8px;padding:8px 12px;font-size:15px}
+</style></head><body>
+<h1>⚽ Partidos de hoy</h1>
+<button onclick="cambiarKey()">Cambiar API key</button>
+<div id="app">Cargando...</div>
+<script>
+const $=id=>document.getElementById(id);
+function cambiarKey(){
+  const k=prompt("Pega tu API key de API-Football");
+  if(k){localStorage.setItem("key",k.trim());cargar();}
+}
+async function cargar(){
+  const key=localStorage.getItem("key");
+  if(!key){cambiarKey();return;}
+  const hoy=new Date().toLocaleDateString("en-CA",{timeZone:"America/Bogota"});
+  try{
+    const r=await fetch("https://v3.football.api-sports.io/fixtures?date="+hoy+"&timezone=America/Bogota",{headers:{"x-apisports-key":key}});
+    const d=await r.json();
+    const err=Object.values(d.errors||{}).join(" ");
+    if(err){$("app").textContent="Error: "+err;return;}
+    const g={};
+    d.response.forEach(m=>{
+      const k=m.league.country+" — "+m.league.name;
+      (g[k]=g[k]||[]).push(m);
+    });
+    let h="";
+    Object.keys(g).sort().forEach(k=>{
+      h+="<h2>"+k+"</h2>";
+      g[k].forEach(m=>{
+        const hora=new Date(m.fixture.date).toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit",timeZone:"America/Bogota"});
+        h+='<div class="p"><span>'+m.teams.home.name+" vs "+m.teams.away.name+"</span><span>"+hora+"</span></div>";
+      });
+    });
+    $("app").innerHTML=h||"No hay partidos hoy.";
+  }catch(e){$("app").textContent="Error de conexión: "+e.message;}
+}
+cargar();
+</script></body></html>
